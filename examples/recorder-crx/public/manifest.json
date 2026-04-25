@@ -1,5 +1,6 @@
 {
-  "name": "Playwright CRX",
+  "name": "rh-recorder",
+  "description": "Record Playwright tests in Chrome and push them as draft PRs to RetailerHub-Inc/rh-e2e-tests. Forked from playwright-crx.",
   "version": "0.15.0",
   "manifest_version": 3,
   "icons": {

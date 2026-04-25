@@ -25,6 +25,7 @@ import type { CrxSettings } from './settings';
 import { addSettingsChangedListener, defaultSettings, loadSettings, removeSettingsChangedListener } from './settings';
 import ModalContainer, { create as createModal } from 'react-modal-promise';
 import { SaveCodeForm } from './saveCodeForm';
+import { GithubSaveForm } from './githubSaveForm';
 import './crxRecorder.css';
 import './form.css';
 
@@ -162,6 +163,39 @@ export const CrxRecorder: React.FC = ({
         .catch(() => {});
   }, [settings, source, selectedFileId]);
 
+  const saveToGithub = React.useCallback(() => {
+    const code = source?.text;
+    if (!code) {
+      window.alert('Nothing to save yet — record some actions first.');
+      return;
+    }
+    if (selectedFileId !== 'playwright-test') {
+      const proceed = window.confirm(
+          `Save to GitHub is designed for Playwright Test (.spec.ts) output. ` +
+          `The current language is "${selectedFileId}". Push anyway?`,
+      );
+      if (!proceed) return;
+    }
+
+    const modal = createModal(({ isOpen, onResolve, onReject }) => {
+      return <Dialog title='Save to GitHub' isOpen={isOpen} onClose={onReject}>
+        <GithubSaveForm
+          code={code}
+          onSubmit={onResolve}
+          onError={err => {
+            window.alert(`Push failed:\n\n${err.message}`);
+          }}
+        />
+      </Dialog>;
+    });
+    modal()
+        .then((result) => {
+          if (result?.prUrl)
+            window.alert(`Draft PR opened:\n${result.prUrl}\n\nFile: ${result.filePath}`);
+        })
+        .catch(() => { /* user cancelled */ });
+  }, [source, selectedFileId]);
+
   React.useEffect(() => {
     if (!settings.experimental)
       return;
@@ -191,8 +225,15 @@ export const CrxRecorder: React.FC = ({
     <ModalContainer />
 
     <div className='recorder'>
-      {settings.experimental && <>
-        <Toolbar>
+      <Toolbar>
+        <ToolbarButton
+          icon='cloud-upload'
+          title='Push recording to GitHub as a draft PR'
+          disabled={false}
+          onClick={saveToGithub}
+        >Save to GitHub</ToolbarButton>
+        {settings.experimental && <>
+          <ToolbarSeparator />
           <ToolbarButton icon='save' title='Save' disabled={false} onClick={saveCode}>Save</ToolbarButton>
           <div style={{ flex: 'auto' }}></div>
           <div className='dropdown'>
@@ -201,10 +242,11 @@ export const CrxRecorder: React.FC = ({
               <a href='#' onClick={requestStorageState}>Download storage state</a>
             </div>
           </div>
-          <ToolbarSeparator />
-          <ToolbarButton icon='settings-gear' title='Preferences' onClick={showPreferences}></ToolbarButton>
-        </Toolbar>
-      </>}
+        </>}
+        {!settings.experimental && <div style={{ flex: 'auto' }}></div>}
+        <ToolbarSeparator />
+        <ToolbarButton icon='settings-gear' title='Preferences' onClick={showPreferences}></ToolbarButton>
+      </Toolbar>
       <Recorder sources={sources} paused={paused} log={log} mode={mode} onEditedCode={dispatchEditedCode} onCursorActivity={dispatchCursorActivity} />
     </div>
   </>;
