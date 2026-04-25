@@ -191,7 +191,7 @@ export const CrxRecorder: React.FC = ({
     modal()
         .then((result) => {
           if (result?.prUrl)
-            window.alert(`Draft PR opened:\n${result.prUrl}\n\nFile: ${result.filePath}`);
+            window.alert(`PR opened:\n${result.prUrl}\n\nFile: ${result.filePath}`);
         })
         .catch(() => { /* user cancelled */ });
   }, [source, selectedFileId]);

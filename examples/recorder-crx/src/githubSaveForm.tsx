@@ -139,7 +139,7 @@ export const GithubSaveForm: React.FC<GithubSaveFormProps> = ({ code, onSubmit, 
       />
 
       <button id='submit' type='submit' disabled={busy || !token || !filename}>
-        {busy ? 'Pushing…' : 'Push as draft PR'}
+        {busy ? 'Pushing…' : 'Open pull request'}
       </button>
     </form>
   );

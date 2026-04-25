@@ -141,7 +141,8 @@ export async function pushRecordedTest(args: PushTestArgs): Promise<PushedTestRe
     },
   });
 
-  // 4. Open a draft PR.
+  // 4. Open the PR (ready-for-review, not draft — repo-level email
+  //    notifications fire on opened PRs and we want them to fire here).
   const pr = await api<{ html_url: string; number: number }>(
       `/repos/${owner}/${repo}/pulls`,
       {
@@ -151,7 +152,7 @@ export async function pushRecordedTest(args: PushTestArgs): Promise<PushedTestRe
           title: `test: ${testTitle ?? filename}`,
           head: branchName,
           base: baseBranch,
-          draft: true,
+          draft: false,
           body: `Recorded by **rh-recorder** Chrome extension.\n\n` +
             `File: \`${filePath}\`\n\n` +
             `After merge, the next \`/qa-e2e\` run on the VPS will categorize this test ` +
