@@ -22,22 +22,41 @@
 
 const STORAGE_KEY_URL = 'rh-recorder.llm.url';
 const STORAGE_KEY_KEY = 'rh-recorder.llm.apiKey';
+const STORAGE_KEY_MODEL = 'rh-recorder.llm.model';
+
+// The strongest models exposed by llm-api (see agents/models/model-names.mts).
+// Default favors GPT-5.4 Pro because it's the newest GPT-5 and has consistently
+// the lowest API-hallucination rate in our testing. Users can switch to Gemini
+// 3.1 Pro if they prefer.
+export const AVAILABLE_MODELS = [
+  { id: 'gpt-5.4-pro-2026-03-05', label: 'GPT-5.4 Pro' },
+  { id: 'gpt-5.4-2026-03-05', label: 'GPT-5.4' },
+  { id: 'gpt-5-pro-2025-10-06', label: 'GPT-5 Pro' },
+  { id: 'gpt-5-2025-08-07', label: 'GPT-5' },
+  { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+] as const;
+
+export const DEFAULT_MODEL_ID = 'gpt-5.4-pro-2026-03-05';
 
 export interface LlmConfig {
   url: string;
   apiKey: string;
+  model: string;
 }
 
 export const DEFAULT_LLM_CONFIG: LlmConfig = {
   url: '',
   apiKey: '',
+  model: DEFAULT_MODEL_ID,
 };
 
 export async function loadLlmConfig(): Promise<LlmConfig> {
-  const result = await chrome.storage.local.get([STORAGE_KEY_URL, STORAGE_KEY_KEY]);
+  const result = await chrome.storage.local.get([STORAGE_KEY_URL, STORAGE_KEY_KEY, STORAGE_KEY_MODEL]);
   return {
     url: result[STORAGE_KEY_URL] ?? '',
     apiKey: result[STORAGE_KEY_KEY] ?? '',
+    model: result[STORAGE_KEY_MODEL] ?? DEFAULT_MODEL_ID,
   };
 }
 
@@ -45,6 +64,7 @@ export async function saveLlmConfig(cfg: LlmConfig): Promise<void> {
   await chrome.storage.local.set({
     [STORAGE_KEY_URL]: cfg.url,
     [STORAGE_KEY_KEY]: cfg.apiKey,
+    [STORAGE_KEY_MODEL]: cfg.model || DEFAULT_MODEL_ID,
   });
 }
 
@@ -59,19 +79,56 @@ export interface RewriteTestArgs {
 const SYSTEM_PROMPT = `You are an autonomous Playwright test editor.
 
 You will receive:
-1. The CURRENT Playwright test (TypeScript / @playwright/test).
+1. The CURRENT Playwright test (TypeScript, @playwright/test).
 2. The HTML of the page the test is exercising.
 3. A natural-language INSTRUCTION from the developer.
 
 Apply the instruction by rewriting the CURRENT test. Output ONLY the updated test code:
 - No explanation before or after.
-- No markdown fences (no \`\`\`typescript \`\`\` wrappers).
+- No markdown fences (no \`\`\`typescript wrappers).
 - Preserve imports, top-level structure, and the existing test() block(s) unless the instruction explicitly says otherwise.
-- Prefer ARIA-based locators (page.getByRole, getByLabel, getByText) over CSS/XPath.
-- When the instruction says "any element in the grid" or similar non-deterministic phrasing, use locators that select the first match (e.g., page.getByRole('row').first()) rather than hardcoding a value.
-- Keep assertions concrete: every test should end with at least one expect(...) that verifies the expected end-state visible in the HTML.
-- Do not invent locators that aren't supported by the HTML provided.
-- Do not insert credentials, API keys, or URLs that aren't already in the input.
+
+## Playwright API — use ONLY these documented methods. NEVER invent method names.
+
+Locators (return a Locator):
+- page.locator(selector)            — CSS / XPath / text=...
+- page.getByRole('button', { name: 'X' })
+- page.getByText('X')
+- page.getByLabel('X')
+- page.getByPlaceholder('X')
+- page.getByTitle('X')
+- page.getByTestId('X')
+- page.getByAltText('X')
+
+Locator narrowing:
+- locator.first(), .last(), .nth(n)
+- locator.filter({ hasText: 'X' })
+- locator.locator(childSelector)
+
+Locator → array of locators:
+- await locator.all()               — returns Promise<Locator[]>
+
+Common assertions (web-first, AUTO-WAIT):
+- await expect(locator).toBeVisible()
+- await expect(locator).toContainText('X')
+- await expect(locator).toHaveText('X')
+- await expect(locator).toHaveCount(n)
+- await expect(locator).toBeAttached()
+- await expect(page).toHaveURL(/regex/)
+- await expect(page).toHaveTitle(/regex/)
+
+## NEVER use these (they don't exist or aren't recommended):
+- page.locatorAll(...)              — DOES NOT EXIST. Use page.locator(sel).all() or just page.locator(sel) directly.
+- page.querySelector / page.querySelectorAll — these are DOM APIs, not Playwright. Use page.locator(sel) instead.
+- locator.length / .count            — use await locator.count() (a method, returns Promise<number>) or expect(locator).toHaveCount(n).
+- expect(value)                      — bare expect on a non-locator value: only use for primitive checks like expect(arr.length).toBeGreaterThan(0). For DOM presence, use expect(locator).toBeVisible() etc.
+
+## Heuristics
+- Prefer ARIA locators over CSS class/id selectors when the HTML provides accessible names.
+- "Any element in the grid" → locator.first() (don't hardcode a value).
+- Every test should end with at least one assertion that verifies the expected end-state visible in the HTML.
+- Don't invent locators that aren't supported by the HTML provided.
+- Don't insert credentials, API keys, or URLs that aren't already in the input.
 
 Return only the .ts source. Anything else you output will end up in the test file and break it.`;
 
@@ -128,7 +185,7 @@ export async function rewriteTestViaLlm(args: RewriteTestArgs): Promise<string> 
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'human', content: userMessage },
       ],
-      // Let the server pick the model + provider.
+      model: config.model || DEFAULT_MODEL_ID,
       temperature: 0.2,
     }),
   });

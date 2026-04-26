@@ -14,6 +14,8 @@ import {
   saveLlmConfig,
   rewriteTestViaLlm,
   LlmConfig,
+  AVAILABLE_MODELS,
+  DEFAULT_MODEL_ID,
 } from './llmApi';
 import './aiPromptBox.css';
 
@@ -30,7 +32,7 @@ export const AiPromptBox: React.FC<AiPromptBoxProps> = ({ currentCode, onCodeUpd
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [showSettings, setShowSettings] = React.useState(false);
-  const [config, setConfig] = React.useState<LlmConfig>({ url: '', apiKey: '' });
+  const [config, setConfig] = React.useState<LlmConfig>({ url: '', apiKey: '', model: DEFAULT_MODEL_ID });
 
   React.useEffect(() => {
     loadLlmConfig().then(cfg => {
@@ -147,6 +149,17 @@ export const AiPromptBox: React.FC<AiPromptBoxProps> = ({ currentCode, onCodeUpd
               onChange={e => setConfig({ ...config, apiKey: e.target.value.trim() })}
               placeholder='x-api-key value'
             />
+          </label>
+          <label>
+            Model
+            <select
+              value={config.model}
+              onChange={e => setConfig({ ...config, model: e.target.value })}
+            >
+              {AVAILABLE_MODELS.map(m => (
+                <option key={m.id} value={m.id}>{m.label} ({m.id})</option>
+              ))}
+            </select>
           </label>
           <button type='button' onClick={onSettingsSave} disabled={!config.url || !config.apiKey}>
             Save
