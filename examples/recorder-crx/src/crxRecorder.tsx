@@ -26,6 +26,7 @@ import { addSettingsChangedListener, defaultSettings, loadSettings, removeSettin
 import ModalContainer, { create as createModal } from 'react-modal-promise';
 import { SaveCodeForm } from './saveCodeForm';
 import { GithubSaveForm } from './githubSaveForm';
+import { AiPromptBox } from './aiPromptBox';
 import './crxRecorder.css';
 import './form.css';
 
@@ -248,6 +249,10 @@ export const CrxRecorder: React.FC = ({
         <ToolbarButton icon='settings-gear' title='Preferences' onClick={showPreferences}></ToolbarButton>
       </Toolbar>
       <Recorder sources={sources} paused={paused} log={log} mode={mode} onEditedCode={dispatchEditedCode} onCursorActivity={dispatchCursorActivity} />
+      <AiPromptBox
+        currentCode={source?.text ?? ''}
+        onCodeUpdated={(newCode) => dispatchEditedCode(newCode)}
+      />
     </div>
   </>;
 };

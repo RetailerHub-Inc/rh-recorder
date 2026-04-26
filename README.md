@@ -8,7 +8,15 @@ This is the **author-time** half of the qa-e2e system. The runtime half lives on
 
 ## What this adds on top of playwright-crx
 
-A "Save to GitHub" button in the recorder toolbar. After recording a flow, click it to:
+Two things:
+
+**1. "Edit with AI" panel** — a chat box below the Locator/Log/Aria tabs. Type a natural-language instruction ("make this test pick any row in the documents grid and assert an expanded detail row appears beneath it") and the extension sends `{ user instruction + current generated test + page HTML }` to RetailerHub's `llm-api` `/api/v1/completion`. The model returns an updated test which replaces what's in the editor. Useful for turning recorded clicks into resilient tests, swapping hardcoded values for `.first()` selectors, refining assertions, etc.
+
+  - First run prompts you for the LLM API URL and API key (saved in `chrome.storage.local`).
+  - The page HTML is captured via `chrome.scripting.executeScript` from the recorded tab. Heavy bits (script/style bodies, base64 data URIs) are stripped and the result is capped at ~60KB to stay within context.
+  - `Cmd/Ctrl+Enter` sends.
+
+**2. "Save to GitHub" button in the recorder toolbar.** After recording a flow, click it to:
 
 1. Enter your fine-grained GitHub PAT (saved in `chrome.storage.local`, never logged).
 2. Confirm the target repo + folder (defaults: `RetailerHub-Inc/rh-e2e-tests` / `tests/unsorted`).
@@ -107,9 +115,12 @@ See `CLAUDE.md` for the full list. Quick reference:
 
 - `examples/recorder-crx/src/githubApi.ts` — GitHub fetch client + storage helpers.
 - `examples/recorder-crx/src/githubSaveForm.tsx` — modal form component.
-- `examples/recorder-crx/src/crxRecorder.tsx` — UI integration (toolbar button + handler). Otherwise upstream.
+- `examples/recorder-crx/src/llmApi.ts` — `llm-api` `/api/v1/completion` client + storage helpers + system prompt + HTML compaction.
+- `examples/recorder-crx/src/aiPromptBox.tsx` — "Edit with AI" panel component (textarea, send, settings).
+- `examples/recorder-crx/src/aiPromptBox.css` — styles for the panel.
+- `examples/recorder-crx/src/crxRecorder.tsx` — UI integration (Save-to-GitHub button + AiPromptBox below the Recorder). Otherwise upstream.
 - `examples/recorder-crx/src/form.css` — small additions for password input + row/col layout + hint styles.
-- `examples/recorder-crx/public/manifest.json` — name + description.
+- `examples/recorder-crx/public/manifest.json` — name + description + `scripting` permission + `host_permissions: <all_urls>` (needed for `chrome.scripting.executeScript` to capture page HTML).
 
 Everything else is upstream `playwright-crx`. Don't modify it without good reason; document the reason in `CLAUDE.md`.
 
@@ -128,6 +139,8 @@ Almost all conflicts will be in `crxRecorder.tsx`. Resolve in favor of keeping t
 - **In-extension test review.** Today the side panel shows the codegen output but the user has to trust it before pushing. A "preview + edit" textarea inside the GitHub modal would let users tune assertions before the push.
 - **Smart assertions.** The recorder captures clicks/fills/expects — but for generative features (image gen, LLM responses) we need semantic assertions. See `RetailerHub-Inc/rh-e2e-tests/README.md` future section.
 - **Repo picker.** Today the owner+repo are typed manually (with sane defaults). Could fetch user's repos via GitHub API and show a dropdown.
+- **Diff review for AI rewrites.** Today "Edit with AI" replaces the editor contents directly. A pre-apply diff view would let the user see what the LLM changed and accept or reject hunks.
+- **Streaming AI responses.** llm-api `/api/v1/completion` is non-streaming today. If a streaming endpoint shows up, swap the fetch for an EventSource for snappier UX on long edits.
 
 ## Related
 

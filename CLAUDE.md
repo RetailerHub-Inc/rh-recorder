@@ -9,9 +9,12 @@ This is a **fork of [`ruifigueira/playwright-crx`](https://github.com/ruifigueir
 **Files we own** (RetailerHub-specific):
 - `examples/recorder-crx/src/githubApi.ts` — fetch-based GitHub client + chrome.storage helpers for PAT/prefs
 - `examples/recorder-crx/src/githubSaveForm.tsx` — modal form (PAT + repo + folder + filename + push)
-- Modifications to `examples/recorder-crx/src/crxRecorder.tsx` — adds the "Save to GitHub" toolbar button + handler. Changes are scoped: import additions, a `saveToGithub` callback, a new toolbar button. Local-save flow is left intact.
-- Additions to `examples/recorder-crx/src/form.css` — styles for the new form (input[type="password"], `.row`/`.col`, `.hint`).
-- Manifest changes in `examples/recorder-crx/public/manifest.json` — `name` and `description`.
+- `examples/recorder-crx/src/llmApi.ts` — fetch client for the local llm-api `/api/v1/completion` endpoint, plus chrome.storage helpers for the LLM URL + key, plus the system prompt and the HTML compaction helper
+- `examples/recorder-crx/src/aiPromptBox.tsx` — "Edit with AI" panel rendered below the upstream `<Recorder />` (textarea + Send + collapsible settings). Captures page HTML via `chrome.scripting.executeScript` against the active recorded tab and dispatches the LLM response back through `onCodeUpdated → window.dispatch({event: 'codeChanged'})`.
+- `examples/recorder-crx/src/aiPromptBox.css` — styles for the AI panel.
+- Modifications to `examples/recorder-crx/src/crxRecorder.tsx` — adds the "Save to GitHub" toolbar button + handler, AND mounts `<AiPromptBox />` below the upstream `<Recorder />`. Changes are scoped: import additions, two callbacks, two new JSX elements. Local-save flow is left intact.
+- Additions to `examples/recorder-crx/src/form.css` — styles for the GitHub form (input[type="password"], `.row`/`.col`, `.hint`).
+- Manifest changes in `examples/recorder-crx/public/manifest.json` — `name`, `description`, `scripting` permission and `host_permissions: <all_urls>` (so `chrome.scripting.executeScript` can read DOM from any recorded tab).
 
 **Files we should NOT modify** (upstream — touch only when necessary, and document why):
 - `playwright/` — vendored Playwright source.
