@@ -188,6 +188,50 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
     await attach(tab, 'recording');
 });
 
+// rh-recorder addition: HTML capture via the existing chrome.debugger session.
+// The AI panel needs the active recorded tab's HTML to send to llm-api. Doing
+// this from the side panel via chrome.scripting.executeScript would require
+// adding the 'scripting' permission AND host_permissions, which Chrome treats
+// as a major permission change and (per user reports) detaches the recording
+// debugger session. Instead, we reuse the debugger that's already attached to
+// the recorded tab and ask the page for its outerHTML via Runtime.evaluate.
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg?.type !== 'rh-recorder/getRecordedTabHtml')
+    return false;
+
+  (async () => {
+    // Prefer the explicitly-attached recorded tab(s); fall back to the active
+    // tab in the lastFocused window if none of ours are attached yet.
+    let tabId: number | undefined = [...attachedTabIds][0];
+    if (tabId === undefined) {
+      const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      tabId = active?.id;
+    }
+    if (tabId === undefined) {
+      sendResponse({ ok: false, error: 'no recorded or active tab found' });
+      return;
+    }
+
+    try {
+      const result = (await chrome.debugger.sendCommand(
+          { tabId },
+          'Runtime.evaluate',
+          { expression: 'document.documentElement.outerHTML', returnByValue: true },
+      )) as { result?: { value?: string } } | undefined;
+      const html = result?.result?.value;
+      if (typeof html !== 'string') {
+        sendResponse({ ok: false, error: 'Runtime.evaluate did not return a string' });
+        return;
+      }
+      sendResponse({ ok: true, html, tabId });
+    } catch (e) {
+      sendResponse({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  })();
+
+  return true;  // tell Chrome we'll sendResponse asynchronously
+});
+
 async function getStorageState() {
   const crxApp = await crxAppPromise;
   if (!crxApp)

@@ -64,27 +64,27 @@ export const AiPromptBox: React.FC<AiPromptBoxProps> = ({ currentCode, onCodeUpd
 
     setBusy(true);
     try {
-      // Capture the active recorded tab's HTML.
-      const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      // Ask background.ts to read outerHTML via the already-attached
+      // chrome.debugger session — no extra permissions required and recording
+      // is not disturbed.
       let pageHtml = '';
       let pageUrl: string | undefined;
+      try {
+        const resp = await chrome.runtime.sendMessage({
+          type: 'rh-recorder/getRecordedTabHtml',
+        }) as { ok: boolean; html?: string; tabId?: number; error?: string };
 
-      if (activeTab?.id) {
-        pageUrl = activeTab.url;
-        try {
-          const [{ result }] = await chrome.scripting.executeScript({
-            target: { tabId: activeTab.id },
-            func: () => document.documentElement.outerHTML,
-          });
-          pageHtml = (result as string) ?? '';
-        } catch (e) {
-          // Common failure: trying to script a chrome:// page or a tab the
-          // extension can't inject into. Continue without HTML — the LLM can
-          // still operate on the test code alone.
-          pageHtml = `<!-- could not capture HTML: ${e instanceof Error ? e.message : String(e)} -->`;
+        if (resp?.ok && typeof resp.html === 'string') {
+          pageHtml = resp.html;
+          if (resp.tabId !== undefined) {
+            const tab = await chrome.tabs.get(resp.tabId).catch(() => undefined);
+            pageUrl = tab?.url;
+          }
+        } else {
+          pageHtml = `<!-- could not capture HTML: ${resp?.error ?? 'unknown error'} -->`;
         }
-      } else {
-        pageHtml = '<!-- no active tab detected -->';
+      } catch (e) {
+        pageHtml = `<!-- could not capture HTML: ${e instanceof Error ? e.message : String(e)} -->`;
       }
 
       const updated = await rewriteTestViaLlm({
