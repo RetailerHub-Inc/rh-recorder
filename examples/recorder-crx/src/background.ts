@@ -133,10 +133,14 @@ async function attach(tab: chrome.tabs.Tab, mode?: Mode) {
     });
   }
 
-  const crxApp = await getCrxApp(tab.incognito);
-
-  try {
-
+  // rh-recorder modification: the upstream attach() throws "Frame has been
+  // detached" if the target tab navigated/refreshed during attach OR if a
+  // prior failure left the cached crxApp pointing at dead frames. Without
+  // recovery the cached crxApp stays bad and EVERY subsequent click fails.
+  // We try once, and on the specific Frame-detached / Target-closed errors
+  // we discard the cached crxApp and retry from scratch.
+  const tryAttach = async () => {
+    const crxApp = await getCrxApp(tab.incognito);
     if (crxApp.recorder.isHidden()) {
       await crxApp.recorder.show({
         mode: mode ?? 'recording',
@@ -145,11 +149,29 @@ async function attach(tab: chrome.tabs.Tab, mode?: Mode) {
         playInIncognito: settings.playInIncognito,
       });
     }
-
     await crxApp.attach(tab.id!);
-
     if (mode)
       await crxApp.recorder.setMode(mode);
+  };
+
+  try {
+    try {
+      await tryAttach();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const isStaleFrame = /Frame has been detached|Target closed|target page, context or browser/i.test(msg);
+      if (!isStaleFrame)
+        throw e;
+
+      // Discard the bad crxApp so getCrxApp() rebuilds it.
+      const stale = crxAppPromise;
+      crxAppPromise = undefined;
+      try { await (await stale)?.close(); } catch { /* ignore */ }
+      attachedTabIds.clear();
+      // Tiny settle so the new tab's frame is ready before attach.
+      await new Promise(resolve => setTimeout(resolve, 300));
+      await tryAttach();
+    }
   } finally {
     chrome.action.enable();
   }
