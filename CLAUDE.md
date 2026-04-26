@@ -14,7 +14,7 @@ This is a **fork of [`ruifigueira/playwright-crx`](https://github.com/ruifigueir
 - `examples/recorder-crx/src/aiPromptBox.css` — styles for the AI panel.
 - Modifications to `examples/recorder-crx/src/crxRecorder.tsx` — adds the "Save to GitHub" toolbar button + handler, AND mounts `<AiPromptBox />` below the upstream `<Recorder />`. Changes are scoped: import additions, two callbacks, two new JSX elements. Local-save flow is left intact.
 - Additions to `examples/recorder-crx/src/form.css` — styles for the GitHub form (input[type="password"], `.row`/`.col`, `.hint`).
-- Manifest changes in `examples/recorder-crx/public/manifest.json` — `name`, `description`, `scripting` permission and `host_permissions: <all_urls>` (so `chrome.scripting.executeScript` can read DOM from any recorded tab).
+- Manifest changes in `examples/recorder-crx/public/manifest.json` — `name`, `description`, and a narrow `host_permissions: ["https://*.azurewebsites.net/*"]`. The host_permissions exists ONLY to let the extension bypass CORS when calling RetailerHub's `llm-api` from the AI panel (the server doesn't currently set `Access-Control-Allow-Origin` for `chrome-extension://` origins). It's deliberately narrow — `<all_urls>` was tried earlier and Chrome reacted by detaching the recording debugger sessions, which broke recording. The current pattern only matches Azure App Service domains. If `llm-api` ever moves off `*.azurewebsites.net` OR llm-api adds proper CORS support, drop this entry.
 
 **Files we should NOT modify** (upstream — touch only when necessary, and document why):
 - `playwright/` — vendored Playwright source.
