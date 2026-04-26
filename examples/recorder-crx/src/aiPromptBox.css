@@ -26,6 +26,14 @@
   opacity: 0.7;
 }
 
+.ai-prompt-turn-count {
+  margin-left: 6px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.85;
+}
+
 .ai-prompt-settings-toggle {
   background: none;
   border: none;
@@ -127,6 +135,12 @@
   font-family: monospace;
 }
 
+.ai-prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .ai-prompt-send {
   background: #4078c0;
   color: white;
@@ -146,6 +160,40 @@
   background: #aab;
   cursor: not-allowed;
   opacity: 0.7;
+}
+
+.ai-prompt-undo {
+  background: transparent;
+  color: var(--vscode-foreground, inherit);
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.ai-prompt-undo:hover:not(:disabled) {
+  background: rgba(128, 128, 128, 0.15);
+}
+
+.ai-prompt-undo:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ai-prompt-reset-link {
+  align-self: flex-start;
+  background: transparent;
+  color: #b25c5c;
+  border: none;
+  padding: 4px 0;
+  cursor: pointer;
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.ai-prompt-reset-link:hover {
+  color: #8c3f3f;
 }
 
 .ai-prompt-error {

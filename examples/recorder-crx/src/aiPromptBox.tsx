@@ -13,7 +13,9 @@ import {
   loadLlmConfig,
   saveLlmConfig,
   rewriteTestViaLlm,
+  hashString,
   LlmConfig,
+  ChatMessage,
   AVAILABLE_MODELS,
   DEFAULT_MODEL_ID,
 } from './llmApi';
@@ -34,6 +36,19 @@ export const AiPromptBox: React.FC<AiPromptBoxProps> = ({ currentCode, onCodeUpd
   const [showSettings, setShowSettings] = React.useState(false);
   const [config, setConfig] = React.useState<LlmConfig>({ url: '', apiKey: '', model: DEFAULT_MODEL_ID });
 
+  // Multi-turn conversation history. Each Send appends the user message + AI
+  // response. Reset wipes it.
+  const [history, setHistory] = React.useState<ChatMessage[]>([]);
+
+  // Per-turn snapshots of the editor code BEFORE the AI replaced it. Undo
+  // pops the last one and restores. Hand-edits between turns aren't snapshot
+  // (only AI replacements are), so undo strictly reverses AI actions.
+  const [codeSnapshots, setCodeSnapshots] = React.useState<string[]>([]);
+
+  // Hash of the page HTML last sent to the model. When the next capture
+  // matches, we tell the model the HTML is unchanged instead of re-sending it.
+  const [lastHtmlHash, setLastHtmlHash] = React.useState<string | null>(null);
+
   React.useEffect(() => {
     loadLlmConfig().then(cfg => {
       setConfig(cfg);
@@ -47,6 +62,43 @@ export const AiPromptBox: React.FC<AiPromptBoxProps> = ({ currentCode, onCodeUpd
     await saveLlmConfig(config);
     setShowSettings(false);
     setError(null);
+  };
+
+  const onResetConversation = () => {
+    setHistory([]);
+    setCodeSnapshots([]);
+    setLastHtmlHash(null);
+    setError(null);
+  };
+
+  const onUndo = () => {
+    if (codeSnapshots.length === 0) return;
+    const previous = codeSnapshots[codeSnapshots.length - 1];
+    setCodeSnapshots(prev => prev.slice(0, -1));
+    // Pop the last user + AI exchange from history so a follow-up doesn't
+    // reference the undone turn.
+    setHistory(prev => prev.slice(0, -2));
+    onCodeUpdated(previous);
+  };
+
+  const captureHtml = async (): Promise<{ html: string; url: string | undefined }> => {
+    try {
+      const resp = await chrome.runtime.sendMessage({
+        type: 'rh-recorder/getRecordedTabHtml',
+      }) as { ok: boolean; html?: string; tabId?: number; error?: string };
+
+      if (resp?.ok && typeof resp.html === 'string') {
+        let url: string | undefined;
+        if (resp.tabId !== undefined) {
+          const tab = await chrome.tabs.get(resp.tabId).catch(() => undefined);
+          url = tab?.url;
+        }
+        return { html: resp.html, url };
+      }
+      return { html: `<!-- could not capture HTML: ${resp?.error ?? 'unknown error'} -->`, url: undefined };
+    } catch (e) {
+      return { html: `<!-- could not capture HTML: ${e instanceof Error ? e.message : String(e)} -->`, url: undefined };
+    }
   };
 
   const onSend = async () => {
@@ -64,38 +116,28 @@ export const AiPromptBox: React.FC<AiPromptBoxProps> = ({ currentCode, onCodeUpd
 
     setBusy(true);
     try {
-      // Ask background.ts to read outerHTML via the already-attached
-      // chrome.debugger session — no extra permissions required and recording
-      // is not disturbed.
-      let pageHtml = '';
-      let pageUrl: string | undefined;
-      try {
-        const resp = await chrome.runtime.sendMessage({
-          type: 'rh-recorder/getRecordedTabHtml',
-        }) as { ok: boolean; html?: string; tabId?: number; error?: string };
+      const { html: pageHtml, url: pageUrl } = await captureHtml();
 
-        if (resp?.ok && typeof resp.html === 'string') {
-          pageHtml = resp.html;
-          if (resp.tabId !== undefined) {
-            const tab = await chrome.tabs.get(resp.tabId).catch(() => undefined);
-            pageUrl = tab?.url;
-          }
-        } else {
-          pageHtml = `<!-- could not capture HTML: ${resp?.error ?? 'unknown error'} -->`;
-        }
-      } catch (e) {
-        pageHtml = `<!-- could not capture HTML: ${e instanceof Error ? e.message : String(e)} -->`;
-      }
+      const newHash = hashString(pageHtml);
+      const htmlChanged = newHash !== lastHtmlHash;
 
-      const updated = await rewriteTestViaLlm({
+      const result = await rewriteTestViaLlm({
         config,
         userInstruction: prompt,
         currentCode,
         pageHtml,
         pageUrl,
+        history,
+        htmlChanged,
       });
 
-      onCodeUpdated(updated);
+      // Snapshot the pre-AI code so Undo can restore it. Push BEFORE we replace.
+      setCodeSnapshots(prev => [...prev, currentCode]);
+      // Append both sides of this turn to history.
+      setHistory(prev => [...prev, result.userMessage, result.aiMessage]);
+      setLastHtmlHash(newHash);
+
+      onCodeUpdated(result.newCode);
       setPrompt('');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -113,11 +155,16 @@ export const AiPromptBox: React.FC<AiPromptBoxProps> = ({ currentCode, onCodeUpd
   };
 
   const configured = !!config.url && !!config.apiKey;
+  const turnCount = Math.floor(history.length / 2);
+  const canUndo = codeSnapshots.length > 0;
 
   return (
     <div className='ai-prompt-box'>
       <div className='ai-prompt-header'>
-        <span className='ai-prompt-title'>Edit with AI</span>
+        <span className='ai-prompt-title'>
+          Edit with AI
+          {turnCount > 0 && <span className='ai-prompt-turn-count'>· {turnCount} turn{turnCount === 1 ? '' : 's'}</span>}
+        </span>
         <button
           type='button'
           className='ai-prompt-settings-toggle'
@@ -167,6 +214,15 @@ export const AiPromptBox: React.FC<AiPromptBoxProps> = ({ currentCode, onCodeUpd
           <small className='ai-prompt-hint'>
             Saved locally via <code>chrome.storage.local</code>. Sent only to the configured URL.
           </small>
+          {turnCount > 0 && (
+            <button
+              type='button'
+              className='ai-prompt-reset-link'
+              onClick={onResetConversation}
+            >
+              Clear conversation history ({turnCount} turn{turnCount === 1 ? '' : 's'})
+            </button>
+          )}
         </div>
       )}
 
@@ -182,14 +238,25 @@ export const AiPromptBox: React.FC<AiPromptBoxProps> = ({ currentCode, onCodeUpd
 
       <div className='ai-prompt-footer'>
         <span className='ai-prompt-hotkey'>⌘/Ctrl + Enter to send</span>
-        <button
-          type='button'
-          className='ai-prompt-send'
-          onClick={onSend}
-          disabled={busy || !prompt.trim()}
-        >
-          {busy ? 'Thinking…' : 'Send'}
-        </button>
+        <div className='ai-prompt-actions'>
+          <button
+            type='button'
+            className='ai-prompt-undo'
+            onClick={onUndo}
+            disabled={busy || !canUndo}
+            title={canUndo ? 'Revert the last AI edit' : 'Nothing to undo'}
+          >
+            Undo
+          </button>
+          <button
+            type='button'
+            className='ai-prompt-send'
+            onClick={onSend}
+            disabled={busy || !prompt.trim()}
+          >
+            {busy ? 'Thinking…' : 'Send'}
+          </button>
+        </div>
       </div>
 
       {error && <div className='ai-prompt-error'>{error}</div>}

@@ -68,22 +68,52 @@ export async function saveLlmConfig(cfg: LlmConfig): Promise<void> {
   });
 }
 
+export type ChatMessage = { role: 'system' | 'human' | 'ai'; content: string };
+
 export interface RewriteTestArgs {
   config: LlmConfig;
   userInstruction: string;
   currentCode: string;
   pageHtml: string;
   pageUrl?: string;
+  // Prior turns in this conversation. Each call appends the new user message
+  // to this array internally; the caller persists the result for next turn.
+  history: ChatMessage[];
+  // True if the page HTML has changed since the last turn (or this is turn 1).
+  // When false, the HTML is omitted from the new user message — the model
+  // already has it in conversation context.
+  htmlChanged: boolean;
+}
+
+export interface RewriteTestResult {
+  newCode: string;
+  // The user message that was actually sent (so the caller can append it +
+  // the AI response to its history).
+  userMessage: ChatMessage;
+  aiMessage: ChatMessage;
 }
 
 const SYSTEM_PROMPT = `You are an autonomous Playwright test editor.
 
-You will receive:
+You may receive multiple turns from the same developer. Each turn you'll see:
 1. The CURRENT Playwright test (TypeScript, @playwright/test).
-2. The HTML of the page the test is exercising.
+2. The HTML of the page the test is exercising — sent on the first turn and only re-sent when the page has changed. If you don't see fresh HTML in a turn, treat the previously-sent HTML as still authoritative.
 3. A natural-language INSTRUCTION from the developer.
 
-Apply the instruction by rewriting the CURRENT test. Output ONLY the updated test code:
+## ⚠️ Minimal-edit principle (most important rule)
+
+The developer expects you to make ONLY the change they asked for. **Preserve everything else exactly as-is.**
+
+- Do NOT delete existing steps, navigations, waits, fills, clicks, or assertions unless the instruction explicitly says to.
+- "Add X" means ADD — keep the existing flow and insert X.
+- "Fix Y" means change only what's broken with Y; leave unrelated code alone.
+- "Change A to B" means modify only A; everything else stays.
+- If you're unsure whether to remove an existing step, KEEP it.
+- A diff-minded reviewer should be able to see exactly what the instruction asked for and nothing else.
+
+## Output format
+
+Output ONLY the updated test code:
 - No explanation before or after.
 - No markdown fences (no \`\`\`typescript wrappers).
 - Preserve imports, top-level structure, and the existing test() block(s) unless the instruction explicitly says otherwise.
@@ -149,29 +179,36 @@ function compactHtml(html: string, maxLen = 60_000): string {
   return h;
 }
 
-export async function rewriteTestViaLlm(args: RewriteTestArgs): Promise<string> {
-  const { config, userInstruction, currentCode, pageHtml, pageUrl } = args;
+export async function rewriteTestViaLlm(args: RewriteTestArgs): Promise<RewriteTestResult> {
+  const { config, userInstruction, currentCode, pageHtml, pageUrl, history, htmlChanged } = args;
 
   if (!config.url) throw new Error('LLM API URL is not set. Open the AI panel settings and configure it.');
   if (!config.apiKey) throw new Error('LLM API key is not set. Open the AI panel settings and configure it.');
 
-  const compactedHtml = compactHtml(pageHtml);
+  // Compose the new user message. We always include the CURRENT TEST (the
+  // editor may have been hand-edited between turns, so the model can't trust
+  // its own prior response). We only include the page HTML when it has
+  // actually changed — every other turn we tell the model the prior HTML is
+  // still authoritative.
+  const lines: string[] = [];
+  if (pageUrl) lines.push(`Page URL: ${pageUrl}`);
+  lines.push('CURRENT TEST:', '```typescript', currentCode, '```', '');
+  if (htmlChanged) {
+    const compactedHtml = compactHtml(pageHtml);
+    lines.push('PAGE HTML (compacted):', '```html', compactedHtml, '```', '');
+  } else {
+    lines.push('(Page HTML unchanged from previous turn — use the HTML you already have.)', '');
+  }
+  lines.push('INSTRUCTION:', userInstruction);
+  const userContent = lines.join('\n');
 
-  const userMessage = [
-    pageUrl ? `Page URL: ${pageUrl}` : '',
-    'CURRENT TEST:',
-    '```typescript',
-    currentCode,
-    '```',
-    '',
-    'PAGE HTML (compacted):',
-    '```html',
-    compactedHtml,
-    '```',
-    '',
-    'INSTRUCTION:',
-    userInstruction,
-  ].filter(Boolean).join('\n');
+  const userMessage: ChatMessage = { role: 'human', content: userContent };
+
+  const messages: ChatMessage[] = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    ...history,
+    userMessage,
+  ];
 
   const url = config.url.replace(/\/+$/, '') + '/api/v1/completion';
   const res = await fetch(url, {
@@ -181,10 +218,7 @@ export async function rewriteTestViaLlm(args: RewriteTestArgs): Promise<string> 
       'x-api-key': config.apiKey,
     },
     body: JSON.stringify({
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'human', content: userMessage },
-      ],
+      messages,
       model: config.model || DEFAULT_MODEL_ID,
       temperature: 0.2,
     }),
@@ -204,7 +238,23 @@ export async function rewriteTestViaLlm(args: RewriteTestArgs): Promise<string> 
   if (typeof out !== 'string')
     throw new Error('llm-api returned a non-string response (got ' + typeof out + '). The completions endpoint should return { response: string } for plain text.');
 
-  return stripMarkdownFences(out);
+  const newCode = stripMarkdownFences(out);
+  return {
+    newCode,
+    userMessage,
+    aiMessage: { role: 'ai', content: out },
+  };
+}
+
+// Cheap, fast hash for HTML-change detection. Crypto-strength is unnecessary;
+// we just need same-text → same-output. Polynomial rolling hash on the string.
+export function hashString(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16);
 }
 
 // Defensive: if the model wraps the test in ```typescript ... ``` despite the
