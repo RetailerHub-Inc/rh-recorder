@@ -107,9 +107,28 @@ function utf8ToBase64(input: string): string {
   return btoa(unescape(encodeURIComponent(input)));
 }
 
+// Swap the recorder's default `import { test, expect } from '@playwright/test'`
+// for our shared fixtures module. The fixtures module re-exports test+expect
+// from Playwright but layers in repo-wide setup (auto-navigate to /documents,
+// future reusable flows like startChatWithAi). Tests written by the recorder
+// don't have to know any of this — the swap happens at push time.
+//
+// The path alias `@fixtures/test` is configured in rh-e2e-tests/tsconfig.json
+// so it's stable across categorizer moves (a test going from tests/unsorted/
+// → tests/checkout/cart/ doesn't need its imports rewritten).
+export function rewriteImportsForRepo(code: string): string {
+  // Match imports of test+expect from @playwright/test in any quote/order.
+  const importPattern = /^(\s*import\s*\{[^}]*\}\s*from\s*)(['"])@playwright\/test\2(\s*;?\s*$)/m;
+  return code.replace(importPattern, '$1$2@fixtures/test$2$3');
+}
+
 export async function pushRecordedTest(args: PushTestArgs): Promise<PushedTestResult> {
-  const { token, prefs, filename, content, testTitle } = args;
+  const { token, prefs, filename, testTitle } = args;
   const { owner, repo, folder, baseBranch } = prefs;
+
+  // Swap the @playwright/test import for our shared fixtures module so
+  // repo-wide setup (auto-navigation etc.) applies without the user editing.
+  const content = rewriteImportsForRepo(args.content);
 
   // 1. Read the tip of the base branch.
   const ref = await api<{ object: { sha: string } }>(
