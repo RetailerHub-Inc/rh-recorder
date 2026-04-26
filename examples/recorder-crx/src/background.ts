@@ -161,10 +161,17 @@ async function setTestIdAttributeName(testIdAttributeName: string) {
 
 chrome.action.onClicked.addListener(attach);
 
-chrome.contextMenus.create({
-  id: 'pw-recorder',
-  title: 'Attach to Playwright Recorder',
-  contexts: ['all'],
+// rh-recorder modification: in MV3 the service worker can sleep and re-wake;
+// each wake re-runs this top-level code, but Chrome keeps the existing menu
+// item across SW lifecycles. Recreating with the same id throws
+// "Cannot create item with duplicate id pw-recorder". removeAll() clears
+// any existing item first so the create always succeeds.
+chrome.contextMenus.removeAll(() => {
+  chrome.contextMenus.create({
+    id: 'pw-recorder',
+    title: 'Attach to Playwright Recorder',
+    contexts: ['all'],
+  });
 });
 
 chrome.contextMenus.onClicked.addListener(async (_, tab) => {

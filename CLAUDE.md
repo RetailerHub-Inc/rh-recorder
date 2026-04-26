@@ -19,7 +19,8 @@ This is a **fork of [`ruifigueira/playwright-crx`](https://github.com/ruifigueir
 **Files we should NOT modify** (upstream — touch only when necessary, and document why):
 - `playwright/` — vendored Playwright source.
 - `src/` (root) — the playwright-crx library itself.
-- `examples/recorder-crx/src/{crxRecorder.css, dialog.tsx, dialog.css, index.tsx, background.ts, settings.ts, preferences*, saveCodeForm.tsx}` — these are upstream.
+- `examples/recorder-crx/src/{crxRecorder.css, dialog.tsx, dialog.css, index.tsx, settings.ts, preferences*, saveCodeForm.tsx}` — these are upstream.
+- `examples/recorder-crx/src/background.ts` — upstream, but with **one targeted fix**: the top-level `chrome.contextMenus.create({id: 'pw-recorder', ...})` is wrapped in `chrome.contextMenus.removeAll()` because in MV3 the service worker re-wakes re-run that block, and Chrome throws "Cannot create item with duplicate id" on the second registration. Look for the `// rh-recorder modification` comment. If you pull from upstream and a conflict appears here, re-apply the wrap.
 - `vite.config.mts`, `eslint.config.mjs`, `tsconfig*.json`, `package*.json` (root) — configs we inherit. If you must touch, document the diff in this CLAUDE.md.
 
 ## Working rule
