@@ -95,6 +95,12 @@ Emails go to whichever address GitHub has on file for your account. To route thi
 
 PRs are opened as **ready-for-review (not draft)** specifically because GitHub's repo-watch emails fire on opened PRs — drafts don't trigger the same notification cascade.
 
+## Known limitations
+
+- **The recorder captures literal keystrokes, including credentials.** If you fill in a username/password during recording, those values land in the generated `.spec.ts` *as plaintext*. There is no automatic substitution to `process.env.RH_TEST_USER` etc. yet. **Before pushing**, review the generated code in the side panel and either: (a) delete the login steps if `fixtures/auth.setup.ts` already covers them (it does for the standard test account), or (b) hand-edit the literals to env-var references.
+- **No post-record review screen yet.** The current "Save to GitHub" modal pushes the generated code as-is. If you realize after pushing that secrets leaked, the only safe fix is rewriting git history (`git filter-repo --replace-text`) AND rotating the leaked credential — GitHub retains orphaned commits by SHA for a while after force-push, so rotation is the load-bearing step.
+- **Hardcoded test credentials in commits are technically already in `~/.secrets/env` on the VPS** — the leak is the same string in two places, but only one of them is in git. Rotate when convenient.
+
 ## Files we own (vs. inherited upstream)
 
 See `CLAUDE.md` for the full list. Quick reference:
